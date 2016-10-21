@@ -4,13 +4,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	//"io"
 	"io/ioutil"
 	"math"
 	"net/http"
-	//"strings"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 type Country struct {
@@ -21,8 +20,15 @@ type Country struct {
 	lng         float64
 }
 
+type Countries []Country
+
+type CentralCapital struct {
+	lat  float64
+	lng  float64
+	dist float64
+}
+
 func GetURL(rUrl *url.URL) ([]byte, error) {
-	//fmt.Printf("%s", rUrl.String())
 	res, err := http.Get(rUrl.String())
 	if err != nil {
 		return nil, err
@@ -35,7 +41,7 @@ func GetURL(rUrl *url.URL) ([]byte, error) {
 	return body, nil
 }
 
-func GetCapitals(cs *[]Country) {
+func (cs *Countries) GetCapitals() {
 	var (
 		mUrl             url.URL
 		query            url.Values
@@ -74,7 +80,7 @@ func GetCapitals(cs *[]Country) {
 	coCount := 0
 	caCount := 0
 	coordCount := 0
-	for i, _ := range geonamesCounties["geonames"] {
+	for i := range geonamesCounties["geonames"] {
 		c.capital = geonamesCounties["geonames"][i]["capital"].(string)
 		c.countryCode = geonamesCounties["geonames"][i]["countryCode"].(string)
 		c.countryName = geonamesCounties["geonames"][i]["countryName"].(string)
@@ -94,7 +100,7 @@ func GetCapitals(cs *[]Country) {
 			}
 			capitals = geonamesCapital["geonames"].([]interface{})
 			findCoord := false
-			for j, _ := range capitals {
+			for j := range capitals {
 				cap = capitals[j].(map[string]interface{})
 				if (cap["fcode"] != nil) && (cap["fcode"].(string) == "PPLC") {
 					c.lat, _ = strconv.ParseFloat(cap["lat"].(string), 64)
@@ -127,9 +133,9 @@ func GetCapitals(cs *[]Country) {
 	}
 }
 
-func LoadCapitals(cs *[]Country, fromWeb bool) {
+func (cs *Countries) LoadCapitals(fromWeb bool) {
 	if fromWeb {
-		GetCapitals(cs)
+		cs.GetCapitals()
 	}
 }
 
@@ -155,29 +161,81 @@ func dist(a Country, b Country) float64 {
 	return ad * rad
 }
 
-func distToCC(cc Country, cs *[]Country) float64 {
-	var total float64 = 0
-	for _, c := range *cs {
-		total += dist(cc, c)
+func (cc *CentralCapital) distToCC(cs *Countries, ch chan CentralCapital) {
+	var c Country
+	c.lat = cc.lat
+	c.lng = cc.lng
+	cc.dist = 0
+	for i := range *cs {
+		cc.dist += dist(c, (*cs)[i])
 	}
-	return total
+	ch <- *cc
 }
 
-func main() {
-	var (
-		countries []Country
-		lat       float64
-		lng       float64
-	)
-	LoadCapitals(&countries, true)
+func (cc *CentralCapital) String() string {
+	return fmt.Sprintf("dist = %f (lat=%f, lng=%f)\n", cc.dist, cc.lat, cc.lng)
+}
 
-	for lat = -90; lat <= 90; lat += 20 {
-		for lng = -180; lng <= 180; lng += 20 {
-			var cc Country
-			cc.lat = lat
-			cc.lng = lng
-			fmt.Printf("dist= %v\n", distToCC(cc, &countries))
+func (cs *Countries) FindCC(sLat, fLat, stepLat, sLng, fLng, stepLng float64) {
+	var (
+		lat      float64
+		lng      float64
+		startCnt int
+		stopCnt  int
+		minCC    CentralCapital
+		flEnd    bool
+	)
+	chIn := make(chan CentralCapital, 20)
+	chOut := make(chan CentralCapital)
+
+	startCnt = 0
+	flEnd = false
+	go func() {
+		for lat = sLat; lat <= fLat; lat += stepLat {
+			for lng = sLng; lng <= fLng; lng += stepLng {
+				var cc CentralCapital
+				cc.lat = lat
+				cc.lng = lng
+				startCnt++
+				chIn <- cc
+			}
+		}
+		fmt.Print("#")
+		flEnd = true
+	}()
+
+	stopCnt = 0
+	for {
+		select {
+		case c, ok := <-chIn:
+			if ok {
+				go c.distToCC(cs, chOut)
+				fmt.Print("-")
+			}
+		case c := <-chOut:
+			stopCnt++
+			if (stopCnt == 1) || (c.dist < minCC.dist) {
+				minCC = c
+				fmt.Print("m")
+			}
+			fmt.Print("+")
+		default:
+			if (flEnd) && (startCnt == stopCnt) {
+				fmt.Println("stop")
+				fmt.Println(minCC.String())
+				return
+			}
 		}
 	}
 
+}
+
+func main() {
+	var countries Countries
+
+	countries.LoadCapitals(true)
+
+	st := time.Now().String()
+	countries.FindCC(42, 44, 0.01, 16, 17, 0.01)
+	fmt.Printf("%s\n%s\n", st, time.Now().String())
 }
