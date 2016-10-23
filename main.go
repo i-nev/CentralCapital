@@ -185,7 +185,7 @@ func (cs *Countries) FindCC(sLat, fLat, stepLat, sLng, fLng, stepLng float64) {
 		minCC    CentralCapital
 		flEnd    bool
 	)
-	chIn := make(chan CentralCapital, 20)
+	chIn := make(chan CentralCapital, 100)
 	chOut := make(chan CentralCapital)
 
 	startCnt = 0
@@ -236,6 +236,6 @@ func main() {
 	countries.LoadCapitals(true)
 
 	st := time.Now().String()
-	countries.FindCC(42, 44, 0.01, 16, 17, 0.01)
+	countries.FindCC(42.99341, 42.994, 0.00001, 16.2893, 16.29, 0.00001)
 	fmt.Printf("%s\n%s\n", st, time.Now().String())
 }
